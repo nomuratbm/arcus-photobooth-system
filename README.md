@@ -24,7 +24,7 @@ A guest takes a photo at a kiosk running a Next.js web app. The photo goes strai
 | Background removal | Amazon Bedrock (Stability AI image-editing models) | Produces the cutout |
 | Realtime | API Gateway WebSocket API | Pushes the result to the kiosk |
 | State | Amazon DynamoDB | Maps photo ID to WebSocket connection ID |
-| Delivery | CloudFront or presigned S3 URLs | Serves the final image |
+| Delivery | Amazon CloudFront (S3 origin with Origin Access Control) | Serves the final image from `final/` only |
 | Infrastructure | AWS CloudFormation | Automates deployment of the backend |
 
 ## Routes
@@ -80,12 +80,18 @@ arcus-photobooth-system/
 { "status": "error", "message": "..." }
 ```
 
+### Final image URL
+The kiosk builds the image URL from the WebSocket `key`:
+`https://{CLOUDFRONT_DOMAIN}/{key}`
+Example: `https://dxxxx.cloudfront.net/final/{photoId}.jpg`
+
 ### Environment variables
 | Variable | Used by |
 |---|---|
 | `BUCKET_NAME` | process-photo, presign, kiosk server routes |
 | `TABLE_NAME` | process-photo, ws-connect, ws-disconnect |
 | `WS_ENDPOINT` | process-photo (for `PostToConnection`) |
+| `CLOUDFRONT_DOMAIN` | kiosk (`NEXT_PUBLIC_CLOUDFRONT_DOMAIN`), end-to-end test script |
 
 ## Processing Lambda steps
 
@@ -119,7 +125,7 @@ Suggested settings: 1.5–3 GB memory and a timeout of at least 60 seconds.
 cd infra
 ./scripts/deploy.sh dev
 ```
-The stack outputs the bucket name, table name, and WebSocket URL.
+The stack outputs the bucket name, table name, WebSocket URL, and CloudFront domain.
 
 ### Run the kiosk locally
 ```bash
@@ -140,3 +146,5 @@ npm run dev
 - Background removal depends on Amazon Bedrock model availability and access in your region. Verify this early.
 - Sharp must be built for the Lambda runtime (Linux).
 - The S3 trigger must be filtered to `raw/` so writing to `final/` does not retrigger the Lambda.
+- CloudFront must only be allowed to read `final/*`. Do not expose `raw/` or `assets/`.
+- A retried event overwrites `final/{photoId}.jpg` at the same key, so CloudFront could serve a cached older copy. This is rare, but invalidate the path or lower the TTL if it happens.
