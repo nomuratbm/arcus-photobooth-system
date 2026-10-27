@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:bedrock": "tsx tests/test-bedrock.ts"
+    "test:bedrock": "tsx tests/test-bedrock.ts",
+    "test:composite": "tsx tests/local-runner.ts"
   },
   "dependencies": {
     "@aws-sdk/client-apigatewaymanagementapi": "^3.750.0",
