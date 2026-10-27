@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:bedrock": "tsx tests/test-bedrock.ts",
-    "test:composite": "tsx tests/local-runner.ts"
+    "test:composite": "tsx tests/local-runner.ts",
+    "package": "bash scripts/package-lambda.sh arm64",
+    "package:x64": "bash scripts/package-lambda.sh x64"
   },
   "dependencies": {
     "@aws-sdk/client-apigatewaymanagementapi": "^3.750.0",
