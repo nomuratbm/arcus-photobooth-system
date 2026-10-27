@@ -89,6 +89,7 @@ describe('S3 Read & Write Operations', () => {
         Key: 'final/photo-789.jpg',
         Body: imageBuffer,
         ContentType: 'image/jpeg',
+        CacheControl: 'public, max-age=86400',
       })
     );
   });

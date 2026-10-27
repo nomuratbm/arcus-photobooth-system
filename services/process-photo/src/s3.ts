@@ -87,6 +87,7 @@ export async function writeFinalPhotoToS3(
     Key: key,
     Body: imageBuffer,
     ContentType: 'image/jpeg',
+    CacheControl: 'public, max-age=86400',
   });
 
   await client.send(command);
