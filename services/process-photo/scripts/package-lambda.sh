@@ -41,23 +41,33 @@ cat << 'EOF' > "${STAGING_DIR}/package.json"
 }
 EOF
 
-# 5. Install native Sharp binaries for target Linux architecture
+# 5. Install native Sharp binaries for target Linux architecture.
+# IMPORTANT: install `sharp` itself with --os/--cpu/--libc so npm resolves the
+# platform-matching optional deps (@img/sharp-linux-<arch> AND its
+# @img/sharp-libvips-linux-<arch>) at the SAME version that sharp pins.
+# Hand-installing a floating `@img/sharp-linux-<arch>` pulls the latest binding,
+# which links a newer libvips-cpp.so than the pinned sharp ships -> the runtime
+# fails with ERR_DLOPEN_FAILED (libvips-cpp.so.X: cannot open shared object file).
 echo "2. Installing native Sharp binaries for linux-${ARCH}..."
 cd "${STAGING_DIR}"
 
-npm install --omit=dev sharp dotenv
-
 if [ "${ARCH}" = "arm64" ]; then
-  npm install --force --os=linux --cpu=arm64 @img/sharp-linux-arm64
+  npm install --omit=dev --force --os=linux --cpu=arm64 --libc=glibc sharp dotenv
 else
-  npm install --force --os=linux --cpu=x64 @img/sharp-linux-x64
+  npm install --omit=dev --force --os=linux --cpu=x64 --libc=glibc sharp dotenv
 fi
 
 # 6. Create deployment zip
 echo "3. Creating deployment archive..."
 rm -f "${ZIP_FILE}"
 cd "${STAGING_DIR}"
-zip -q -r "${ZIP_FILE}" index.mjs node_modules package.json
+if command -v zip >/dev/null 2>&1; then
+  zip -q -r "${ZIP_FILE}" index.mjs node_modules package.json
+else
+  # Fallback for environments without Info-ZIP (e.g. Git Bash on Windows): use 7-Zip.
+  SZ="$(command -v 7z 2>/dev/null || echo '/c/Program Files/7-Zip/7z.exe')"
+  "$SZ" a -tzip "${ZIP_FILE}" index.mjs node_modules package.json >/dev/null
+fi
 
 # 7. Summary
 ZIP_SIZE=$(du -h "${ZIP_FILE}" | cut -f1)
