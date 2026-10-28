@@ -1,0 +1,35 @@
+{
+  "name": "process-photo",
+  "version": "1.0.0",
+  "description": "Photobooth image processing Lambda service (Bedrock background removal + Sharp compositing)",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.mjs --external:sharp --external:@aws-sdk/*",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:bedrock": "tsx tests/test-bedrock.ts",
+    "test:composite": "tsx tests/local-runner.ts",
+    "test:sample": "tsx tests/process-sample.ts",
+    "package": "bash scripts/package-lambda.sh arm64",
+    "package:x64": "bash scripts/package-lambda.sh x64"
+  },
+  "dependencies": {
+    "@aws-sdk/client-apigatewaymanagementapi": "^3.750.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.750.0",
+    "@aws-sdk/client-dynamodb": "^3.750.0",
+    "@aws-sdk/client-s3": "^3.750.0",
+    "@aws-sdk/lib-dynamodb": "^3.750.0",
+    "dotenv": "^16.4.7",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.147",
+    "@types/node": "^22.13.4",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}
