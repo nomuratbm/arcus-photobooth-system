@@ -48,7 +48,7 @@ export default async function PrintPage({
           <h1 className="font-display text-4xl">Print desk</h1>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/" className="text-sm text-paper/80 underline-offset-4 hover:underline">
+          <Link href="/camera" className="text-sm text-paper/80 underline-offset-4 hover:underline">
             Back to booth
           </Link>
           <PrintButton />

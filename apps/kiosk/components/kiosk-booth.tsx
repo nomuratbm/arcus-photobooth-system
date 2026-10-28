@@ -4,13 +4,29 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BoothNotice, PhotoResult } from "@/components/photo-result";
 import { CountdownOverlay } from "@/components/countdown-overlay";
-import { LookPicker } from "@/components/look-picker";
 import {
   COUNTDOWN_SECONDS,
   startGuestSession,
   type GuestPhase,
 } from "@/lib/guest-session";
-import type { PublicConfig } from "@/lib/contracts";
+import type { BoothConfig } from "@/lib/contracts";
+
+const boothHeader = (
+  <header className="flex shrink-0 items-center justify-between">
+    <p className="font-display text-3xl tracking-wide">ARCUS</p>
+    <div className="flex items-center gap-3">
+      <Link
+        href="/"
+        className="rounded-full border border-paper/30 px-4 py-2 text-sm"
+      >
+        Exit
+      </Link>
+      <Link href="/print" className="no-print text-sm text-paper/70 underline-offset-4 hover:underline">
+        Staff
+      </Link>
+    </div>
+  </header>
+);
 
 function statusLabel(
   phase: GuestPhase,
@@ -27,15 +43,13 @@ function statusLabel(
   return `Press the shutter. You will have ${COUNTDOWN_SECONDS} seconds.`;
 }
 
-export function KioskBooth({ config }: { config: PublicConfig }) {
+export function KioskBooth({ config }: { config: BoothConfig }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const sessionRef = useRef<{ cancel: () => void } | null>(null);
   const mountedRef = useRef(true);
   const phaseRef = useRef<GuestPhase["type"]>("idle");
   const [phase, setPhase] = useState<GuestPhase>({ type: "idle" });
-  const [frameId, setFrameId] = useState(config.frames[0]?.id ?? "default");
-  const [bgId, setBgId] = useState(config.backgrounds[0]?.id ?? "default");
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
 
@@ -95,6 +109,14 @@ export function KioskBooth({ config }: { config: PublicConfig }) {
     setBoothPhase({ type: "idle" });
   }, [setBoothPhase]);
 
+  useEffect(() => {
+    if (phase.type !== "done") return;
+    const stream = streamRef.current;
+    if (stream === null) return;
+    stream.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+  }, [phase.type]);
+
   function handleTakePhoto() {
     if (phaseRef.current !== "idle" || cameraError !== null || !cameraReady) return;
     const video = videoRef.current;
@@ -105,24 +127,22 @@ export function KioskBooth({ config }: { config: PublicConfig }) {
       wsUrl: config.wsUrl,
       cloudfrontDomain: config.cloudfrontDomain,
       eventId: config.eventId,
-      frameId,
-      bgId,
+      frameId: config.frameId,
+      bgId: config.bgId,
       onPhase: setBoothPhase,
     });
   }
 
-  const choosingLook = phase.type !== "idle";
+  if (phase.type === "done") {
+    return <PhotoResult url={phase.url} />;
+  }
+
   const label = statusLabel(phase, cameraError, cameraReady);
   const showProgress = phase.type === "uploading" || phase.type === "processing";
 
   return (
     <div className="mx-auto flex h-dvh max-w-6xl flex-col gap-4 overflow-hidden px-6 py-4">
-      <header className="flex shrink-0 items-center justify-between">
-        <p className="font-display text-3xl tracking-wide">ARCUS</p>
-        <Link href="/print" className="no-print text-sm text-paper/70 underline-offset-4 hover:underline">
-          Staff
-        </Link>
-      </header>
+      {boothHeader}
 
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-4 md:grid-cols-[minmax(0,1fr)_15rem] md:grid-rows-1">
         <section className="relative min-h-0 overflow-hidden rounded-[2rem] bg-black shadow-[0_0_0_10px_rgba(244,239,230,0.08)]">
@@ -141,29 +161,12 @@ export function KioskBooth({ config }: { config: PublicConfig }) {
           {showProgress ? (
             <p className="absolute inset-x-6 bottom-6 text-center text-lg">{label}</p>
           ) : null}
-          {phase.type === "done" ? (
-            <PhotoResult url={phase.url} onNewPhoto={handleReset} />
-          ) : null}
           {phase.type === "error" ? (
             <BoothNotice message={phase.message} action="Try again" onAction={handleReset} />
           ) : null}
         </section>
 
         <aside className="flex flex-col gap-6">
-          <LookPicker
-            label="Frame"
-            options={config.frames}
-            value={frameId}
-            disabled={choosingLook}
-            onChange={setFrameId}
-          />
-          <LookPicker
-            label="Background"
-            options={config.backgrounds}
-            value={bgId}
-            disabled={choosingLook}
-            onChange={setBgId}
-          />
           <button
             type="button"
             onClick={handleTakePhoto}

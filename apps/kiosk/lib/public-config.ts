@@ -28,6 +28,14 @@ function parseLookOptions(value: string | undefined): LookOption[] {
   return options;
 }
 
+export function frameIdFromQuery(
+  frames: LookOption[],
+  requested: string | undefined,
+): string {
+  if (requested && frames.some((frame) => frame.id === requested)) return requested;
+  return frames[0]?.id ?? "default";
+}
+
 export function getPublicConfig(): PublicConfig {
   const eventId = process.env.NEXT_PUBLIC_EVENT_ID?.trim() || "default";
 

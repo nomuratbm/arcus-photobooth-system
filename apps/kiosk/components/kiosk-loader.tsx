@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { PublicConfig } from "@/lib/contracts";
+import type { BoothConfig } from "@/lib/contracts";
 
 const boothFallback = (
   <section className="grid min-h-[50vh] place-items-center">
@@ -14,6 +14,6 @@ const KioskBooth = dynamic(
   { ssr: false, loading: () => boothFallback },
 );
 
-export function KioskLoader({ config }: { config: PublicConfig }) {
+export function KioskLoader({ config }: { config: BoothConfig }) {
   return <KioskBooth config={config} />;
 }

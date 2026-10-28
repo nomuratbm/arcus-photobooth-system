@@ -1,29 +1,55 @@
-import Image from "next/image";
+"use client";
 
-export function PhotoResult({
-  url,
-  onNewPhoto,
-}: {
-  url: string;
-  onNewPhoto: () => void;
-}) {
+import Image from "next/image";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+
+const RESULT_SECONDS = 30;
+
+const exitClassName = "rounded-full bg-paper px-8 py-3 font-medium text-ink";
+
+export function PhotoResult({ url }: { url: string }) {
+  const router = useRouter();
+  const routerRef = useRef(router);
+  const [seconds, setSeconds] = useState(RESULT_SECONDS);
+
+  routerRef.current = router;
+
+  useEffect(() => {
+    let remaining = RESULT_SECONDS;
+    const timer = window.setInterval(() => {
+      remaining -= 1;
+      if (remaining > 0) {
+        setSeconds(remaining);
+        return;
+      }
+      window.clearInterval(timer);
+      routerRef.current.push("/");
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
   return (
-    <div className="absolute inset-0">
-      <Image
-        src={url}
-        alt="Finished photobooth photo"
-        fill
-        unoptimized
-        sizes="(min-width: 1024px) 70vw, 100vw"
-        className="object-cover"
-      />
-      <button
-        type="button"
-        onClick={onNewPhoto}
-        className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full bg-paper px-5 py-2 font-medium text-ink"
-      >
-        New photo
-      </button>
+    <div className="mx-auto flex h-dvh max-w-6xl flex-col items-center gap-6 px-6 py-8">
+      <p aria-live="polite" className="text-center">
+        <span className="font-display text-5xl tabular-nums">{seconds}</span>
+        <span className="mt-1 block text-sm text-paper/70">seconds</span>
+      </p>
+      <div className="relative min-h-0 w-full flex-1 overflow-hidden rounded-[2rem] border-[12px] border-paper bg-black">
+        <Image
+          src={url}
+          alt="Finished photobooth photo in its frame"
+          fill
+          unoptimized
+          sizes="(min-width: 1024px) 70vw, 100vw"
+          className="object-contain"
+        />
+      </div>
+      <Link href="/" className={exitClassName}>
+        Exit
+      </Link>
     </div>
   );
 }

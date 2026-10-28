@@ -11,6 +11,14 @@ export type PublicConfig = {
   backgrounds: LookOption[];
 };
 
+export type BoothConfig = {
+  wsUrl: string;
+  cloudfrontDomain: string;
+  eventId: string;
+  frameId: string;
+  bgId: string;
+};
+
 export type PrintPhoto = {
   photoId: string;
   url: string;

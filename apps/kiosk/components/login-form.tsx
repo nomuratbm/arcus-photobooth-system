@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { loginAdmin } from "@/lib/actions";
 
 export function LoginForm({
@@ -33,6 +34,12 @@ export function LoginForm({
       >
         Enter
       </button>
+      <Link
+        href="/camera"
+        className="block text-center text-sm text-paper/80 underline-offset-4 hover:underline"
+      >
+        Back to camera
+      </Link>
     </form>
   );
 }
