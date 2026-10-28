@@ -14,19 +14,23 @@ import type { BoothConfig } from "@/lib/contracts";
 const boothHeader = (
   <header className="flex shrink-0 items-center justify-between">
     <p className="font-display text-3xl tracking-wide">ARCUS</p>
-    <div className="flex items-center gap-3">
-      <Link
-        href="/"
-        className="rounded-full border border-paper/30 px-4 py-2 text-sm"
-      >
-        Exit
-      </Link>
-      <Link href="/print" className="no-print text-sm text-paper/70 underline-offset-4 hover:underline">
-        Staff
-      </Link>
-    </div>
+    <Link
+      href="/"
+      className="rounded-full border border-paper/30 px-4 py-2 text-sm"
+    >
+      Exit
+    </Link>
   </header>
 );
+
+function videoConstraints(cameraId: string): MediaTrackConstraints {
+  const size = {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+  };
+  if (cameraId === "") return { facingMode: "user", ...size };
+  return { deviceId: { exact: cameraId }, ...size };
+}
 
 function statusLabel(
   phase: GuestPhase,
@@ -67,11 +71,7 @@ export function KioskBooth({ config }: { config: BoothConfig }) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: {
-            facingMode: "user",
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
+          video: videoConstraints(config.cameraId),
         });
 
         if (cancelled) {
@@ -101,7 +101,7 @@ export function KioskBooth({ config }: { config: BoothConfig }) {
       sessionRef.current?.cancel();
       streamRef.current?.getTracks().forEach((track) => track.stop());
     };
-  }, []);
+  }, [config.cameraId]);
 
   const handleReset = useCallback(() => {
     sessionRef.current?.cancel();

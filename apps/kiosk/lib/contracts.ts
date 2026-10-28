@@ -17,6 +17,7 @@ export type BoothConfig = {
   eventId: string;
   frameId: string;
   bgId: string;
+  cameraId: string;
 };
 
 export type PrintPhoto = {

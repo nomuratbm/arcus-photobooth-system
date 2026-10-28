@@ -28,6 +28,17 @@ function parseLookOptions(value: string | undefined): LookOption[] {
   return options;
 }
 
+const CAMERA_ID_MAX = 256;
+
+export function cameraIdFromQuery(requested: string | undefined): string {
+  if (!requested || requested === "default" || requested.length > CAMERA_ID_MAX) return "";
+  return requested;
+}
+
+export function framePreviewSrc(eventId: string, frameId: string): string {
+  return `/frames/${eventId}/${frameId}.svg`;
+}
+
 export function frameIdFromQuery(
   frames: LookOption[],
   requested: string | undefined,
