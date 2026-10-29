@@ -6,11 +6,12 @@ import { requestPresign, uploadJpeg } from "@/lib/upload";
 export const COUNTDOWN_SECONDS = 5;
 
 /**
- * The Bedrock background-removal model allows 1 request per minute, and each
- * uploaded shot triggers one invocation. Shots are therefore spaced at least
- * this far apart; starting a session too soon after the previous one waits too.
+ * The Bedrock background-removal model allows 1 request per minute. Within a
+ * session the three shots still run back-to-back (5s countdown each); the
+ * cooldown only gates the START of the next session, measured from the last
+ * uploaded shot, so consecutive sessions don't stack up invocations.
  */
-export const SHOT_SPACING_SECONDS = 60;
+export const SESSION_COOLDOWN_SECONDS = 60;
 
 const LAST_SHOT_KEY = "arcus.lastShotAt";
 
@@ -24,13 +25,13 @@ function markShotNow() {
 }
 
 /**
- * Seconds left before another shot can be taken without hitting the 1/min
+ * Seconds left before the next session may start without hitting the 1/min
  * rate limit. Persisted in localStorage so reloads and fresh sessions on the
  * same kiosk honour the previous shot's cooldown.
  */
-export function secondsUntilNextShotAllowed(): number {
+export function secondsUntilNextSessionAllowed(): number {
   const elapsed = (Date.now() - lastShotAt()) / 1000;
-  return Math.max(0, Math.ceil(SHOT_SPACING_SECONDS - elapsed));
+  return Math.max(0, Math.ceil(SESSION_COOLDOWN_SECONDS - elapsed));
 }
 
 export type GuestPhase =
@@ -86,9 +87,9 @@ export function startGuestSession(input: GuestSessionInput): { cancel: () => voi
   const run: Run = { cancelled: false, settled: false };
 
   // The result timeout caps the WHOLE session, so it must also cover the
-  // rate-limit cooldowns and per-shot countdowns that run before processing.
+  // possible pre-session cooldown and the per-shot countdowns.
   const resultTimeoutMs =
-    90_000 + SHOT_COUNT * (SHOT_SPACING_SECONDS + COUNTDOWN_SECONDS) * 1000;
+    90_000 + (SESSION_COOLDOWN_SECONDS + SHOT_COUNT * COUNTDOWN_SECONDS) * 1000;
 
   const session: ManagedSession = openManagedSession(
     wsUrl,
@@ -152,15 +153,18 @@ export function startGuestSession(input: GuestSessionInput): { cancel: () => voi
     if (run.cancelled || run.settled) return;
 
     for (const shot of indices) {
-      // Space shots so the 1/min background remover never gets throttled.
-      let remaining = secondsUntilNextShotAllowed();
-      while (remaining > 0) {
+      // Before the first shot only, wait out any leftover cooldown from the
+      // previous session; within a session the shots run back-to-back.
+      if (shot === 1) {
+        let remaining = secondsUntilNextSessionAllowed();
+        while (remaining > 0) {
+          if (run.cancelled || run.settled) return;
+          onPhase({ type: "cooldown", seconds: remaining, shot });
+          await sleep(1000);
+          remaining = secondsUntilNextSessionAllowed();
+        }
         if (run.cancelled || run.settled) return;
-        onPhase({ type: "cooldown", seconds: remaining, shot });
-        await sleep(1000);
-        remaining = secondsUntilNextShotAllowed();
       }
-      if (run.cancelled || run.settled) return;
 
       // Countdown for this shot.
       for (let seconds = COUNTDOWN_SECONDS; seconds > 0; seconds--) {
@@ -171,8 +175,6 @@ export function startGuestSession(input: GuestSessionInput): { cancel: () => voi
       if (run.cancelled || run.settled) return;
 
       // Capture and upload this shot immediately so processing can start.
-      // The presigned URL is requested per shot: with cooldowns in the loop,
-      // upfront URLs would expire (120s) long before later shots are taken.
       onPhase({ type: "uploading", shot });
       try {
         const uploadUrl = await requestPresign(sessionId, shot);

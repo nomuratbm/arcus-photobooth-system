@@ -6,7 +6,7 @@ import { BoothNotice, PhotoResult } from "@/components/photo-result";
 import { CountdownOverlay } from "@/components/countdown-overlay";
 import {
   COUNTDOWN_SECONDS,
-  secondsUntilNextShotAllowed,
+  secondsUntilNextSessionAllowed,
   startGuestSession,
   type GuestPhase,
 } from "@/lib/guest-session";
@@ -40,7 +40,7 @@ function statusLabel(
   cameraReady: boolean,
 ): string {
   if (phase.type === "cooldown")
-    return `Background remover allows 1 photo/min. Next photo in ${phase.seconds}s.`;
+    return `Background remover allows 1/min. Next session starts in ${phase.seconds}s.`;
   if (phase.type === "countdown")
     return `Shot ${phase.shot} of ${SHOT_COUNT}. Hold still. ${phase.seconds}`;
   if (phase.type === "uploading") return `Sending photo ${phase.shot}…`;
@@ -52,11 +52,11 @@ function statusLabel(
   return `Press the shutter for ${SHOT_COUNT} photos, ${COUNTDOWN_SECONDS}s apart.`;
 }
 
-/** Top-left pill counting down until the next shot is allowed (1/min limit). */
+/** Top-left pill counting down until the next session is allowed (1/min limit). */
 function NextPhotoTimer({ seconds }: { seconds: number }) {
   return (
     <p className="absolute left-4 top-4 z-10 rounded-full bg-ink/85 px-4 py-2 text-sm text-paper backdrop-blur">
-      Next photo in{" "}
+      Next session in{" "}
       <span className="font-display text-lg tabular-nums text-amber">{seconds}</span>s
     </p>
   );
@@ -78,7 +78,7 @@ export function KioskBooth({ config }: { config: BoothConfig }) {
   // (The rendered pill is phase-gated, so no reset is needed when not idle.)
   useEffect(() => {
     if (phase.type !== "idle") return;
-    const update = () => setIdleCooldown(secondsUntilNextShotAllowed());
+    const update = () => setIdleCooldown(secondsUntilNextSessionAllowed());
     const immediate = window.setTimeout(update, 0);
     const timer = window.setInterval(update, 1000);
     return () => {
