@@ -25,23 +25,35 @@ export function PhotoGrid({
     <ul className="print-grid grid grid-cols-2 gap-4 md:grid-cols-3">
       {photos.map((photo, i) => {
         const selected = selectedIds.has(photo.photoId);
+        const isRaw = photo.kind === "raw";
         return (
           <li
             key={photo.photoId}
             className={[
-              "print-card relative aspect-[600/1697] overflow-hidden rounded-2xl bg-white",
+              "print-card relative overflow-hidden rounded-2xl bg-white",
+              // Strips are tall portraits; raw shots are landscape camera frames.
+              isRaw ? "aspect-video" : "aspect-[600/1697]",
               selected ? "print-selected ring-4 ring-amber" : "opacity-60",
               selected && i === lastSelectedIndex ? "print-last" : "",
             ].join(" ")}
           >
             <Image
               src={photo.url}
-              alt={`Finished photo ${photo.photoId}`}
+              alt={
+                isRaw
+                  ? `Raw shot ${photo.shot} from session ${photo.sessionId}`
+                  : `Finished photo ${photo.photoId}`
+              }
               fill
               unoptimized
               sizes="(min-width: 768px) 33vw, 50vw"
               className="object-contain"
             />
+            {isRaw ? (
+              <span className="pointer-events-none absolute bottom-2 left-2 z-20 rounded-full bg-black/60 px-2 py-0.5 text-[10px] tracking-wide text-paper uppercase">
+                Raw {photo.shot}
+              </span>
+            ) : null}
             <button
               type="button"
               onClick={() => onToggle(photo.photoId)}

@@ -23,6 +23,12 @@ export type BoothConfig = {
 export type PrintPhoto = {
   photoId: string;
   url: string;
+  /** "strip" is the composited final; "raw" is one original camera shot. */
+  kind: "strip" | "raw";
+  /** Guest session this photo belongs to. */
+  sessionId: string;
+  /** 1-based capture index; only set for raw shots. */
+  shot?: number;
 };
 
 export type WebSocketMessage =

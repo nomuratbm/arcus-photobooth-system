@@ -36,7 +36,9 @@ export function cameraIdFromQuery(requested: string | undefined): string {
 }
 
 export function framePreviewSrc(eventId: string, frameId: string): string {
-  return `/frames/${eventId}/${frameId}.svg`;
+  // Rendered from the real curated artwork (assets/frames/curated/sample.svg)
+  // so the picker shows exactly what the finished strip looks like.
+  return `/frames/${eventId}/${frameId}.jpg`;
 }
 
 export function frameIdFromQuery(

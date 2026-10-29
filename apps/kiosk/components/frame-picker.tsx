@@ -1,10 +1,10 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
 const DEFAULT_CAMERA = "default";
-const PREVIEW_PHOTO = "/frames/preview-photo.svg";
 
 type FrameChoice = {
   id: string;
@@ -45,12 +45,21 @@ function FrameLook({
   onMissing: () => void;
 }) {
   return (
-    <div className="relative aspect-[3/4] w-full overflow-hidden bg-black">
-      <img src={PREVIEW_PHOTO} alt="" className="absolute inset-[15%] object-cover" />
+    // Preview is the real curated strip (600x1697 artwork); cap the height so
+    // the tall frame never pushes the camera picker off-screen.
+    <div className="relative aspect-[600/1697] max-h-[60dvh] w-full overflow-hidden bg-black">
       {missing ? (
-        <div className="absolute inset-0 border-[18px] border-paper" />
+        <div className="absolute inset-0 border-[10px] border-paper" />
       ) : (
-        <img src={src} alt="" className="absolute inset-0 h-full w-full" onError={onMissing} />
+        <Image
+          src={src}
+          alt=""
+          fill
+          unoptimized
+          sizes="256px"
+          onError={onMissing}
+          className="object-contain"
+        />
       )}
     </div>
   );

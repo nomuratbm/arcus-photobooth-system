@@ -6,6 +6,7 @@ import { BoothNotice, PhotoResult } from "@/components/photo-result";
 import { CountdownOverlay } from "@/components/countdown-overlay";
 import {
   COUNTDOWN_SECONDS,
+  secondsUntilNextShotAllowed,
   startGuestSession,
   type GuestPhase,
 } from "@/lib/guest-session";
@@ -38,6 +39,8 @@ function statusLabel(
   cameraError: string | null,
   cameraReady: boolean,
 ): string {
+  if (phase.type === "cooldown")
+    return `Background remover allows 1 photo/min. Next photo in ${phase.seconds}s.`;
   if (phase.type === "countdown")
     return `Shot ${phase.shot} of ${SHOT_COUNT}. Hold still. ${phase.seconds}`;
   if (phase.type === "uploading") return `Sending photo ${phase.shot}…`;
@@ -49,6 +52,16 @@ function statusLabel(
   return `Press the shutter for ${SHOT_COUNT} photos, ${COUNTDOWN_SECONDS}s apart.`;
 }
 
+/** Top-left pill counting down until the next shot is allowed (1/min limit). */
+function NextPhotoTimer({ seconds }: { seconds: number }) {
+  return (
+    <p className="absolute left-4 top-4 z-10 rounded-full bg-ink/85 px-4 py-2 text-sm text-paper backdrop-blur">
+      Next photo in{" "}
+      <span className="font-display text-lg tabular-nums text-amber">{seconds}</span>s
+    </p>
+  );
+}
+
 export function KioskBooth({ config }: { config: BoothConfig }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -58,6 +71,21 @@ export function KioskBooth({ config }: { config: BoothConfig }) {
   const [phase, setPhase] = useState<GuestPhase>({ type: "idle" });
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
+  const [idleCooldown, setIdleCooldown] = useState(0);
+
+  // While idle, tick the leftover cooldown from the previous shot so the
+  // operator sees when a new session can start without being throttled.
+  // (The rendered pill is phase-gated, so no reset is needed when not idle.)
+  useEffect(() => {
+    if (phase.type !== "idle") return;
+    const update = () => setIdleCooldown(secondsUntilNextShotAllowed());
+    const immediate = window.setTimeout(update, 0);
+    const timer = window.setInterval(update, 1000);
+    return () => {
+      window.clearTimeout(immediate);
+      window.clearInterval(timer);
+    };
+  }, [phase.type]);
 
   const setBoothPhase = useCallback((next: GuestPhase) => {
     phaseRef.current = next.type;
@@ -141,6 +169,8 @@ export function KioskBooth({ config }: { config: BoothConfig }) {
 
   const label = statusLabel(phase, cameraError, cameraReady);
   const showProgress = phase.type === "uploading" || phase.type === "processing";
+  const cooldownSeconds =
+    phase.type === "cooldown" ? phase.seconds : phase.type === "idle" ? idleCooldown : 0;
 
   return (
     <div className="mx-auto flex h-dvh max-w-6xl flex-col gap-4 overflow-hidden px-6 py-4">
@@ -156,6 +186,7 @@ export function KioskBooth({ config }: { config: BoothConfig }) {
             aria-label="Live camera"
             className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
           />
+          {cooldownSeconds > 0 ? <NextPhotoTimer seconds={cooldownSeconds} /> : null}
           {cameraError !== null && phase.type === "idle" ? (
             <p className="absolute inset-x-6 bottom-6 text-center text-sm">{cameraError}</p>
           ) : null}

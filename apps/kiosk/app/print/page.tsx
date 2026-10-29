@@ -2,7 +2,7 @@ import Link from "next/link";
 import { logoutAdmin } from "@/lib/actions";
 import { verifyAdminSession } from "@/lib/auth";
 import type { PrintPhoto } from "@/lib/contracts";
-import { listFinalPhotos, PrintStorageError } from "@/lib/s3";
+import { listFinalPhotos, listRawPhotos, PrintStorageError } from "@/lib/s3";
 import { LoginForm } from "@/components/login-form";
 import { PrintDesk } from "@/components/print-desk";
 
@@ -29,9 +29,12 @@ export default async function PrintPage({
   }
 
   let photos: PrintPhoto[] = [];
+  let rawPhotos: PrintPhoto[] = [];
   let listError: string | null = null;
   try {
     photos = await listFinalPhotos();
+    // Optional extras; listRawPhotos already degrades to [] on failure.
+    rawPhotos = await listRawPhotos();
   } catch (error) {
     listError =
       error instanceof PrintStorageError
@@ -63,7 +66,7 @@ export default async function PrintPage({
       {listError !== null ? (
         <p className="text-lg">{listError}</p>
       ) : (
-        <PrintDesk photos={photos} />
+        <PrintDesk photos={photos} rawPhotos={rawPhotos} />
       )}
     </main>
   );

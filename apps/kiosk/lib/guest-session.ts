@@ -3,10 +3,39 @@ import { finalImageUrl, SHOT_COUNT } from "@/lib/contracts";
 import { openManagedSession, type ManagedSession } from "@/lib/socket";
 import { requestPresign, uploadJpeg } from "@/lib/upload";
 
-export const COUNTDOWN_SECONDS = 10;
+export const COUNTDOWN_SECONDS = 5;
+
+/**
+ * The Bedrock background-removal model allows 1 request per minute, and each
+ * uploaded shot triggers one invocation. Shots are therefore spaced at least
+ * this far apart; starting a session too soon after the previous one waits too.
+ */
+export const SHOT_SPACING_SECONDS = 60;
+
+const LAST_SHOT_KEY = "arcus.lastShotAt";
+
+function lastShotAt(): number {
+  const raw = Number(window.localStorage.getItem(LAST_SHOT_KEY));
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+function markShotNow() {
+  window.localStorage.setItem(LAST_SHOT_KEY, String(Date.now()));
+}
+
+/**
+ * Seconds left before another shot can be taken without hitting the 1/min
+ * rate limit. Persisted in localStorage so reloads and fresh sessions on the
+ * same kiosk honour the previous shot's cooldown.
+ */
+export function secondsUntilNextShotAllowed(): number {
+  const elapsed = (Date.now() - lastShotAt()) / 1000;
+  return Math.max(0, Math.ceil(SHOT_SPACING_SECONDS - elapsed));
+}
 
 export type GuestPhase =
   | { type: "idle" }
+  | { type: "cooldown"; seconds: number; shot: number }
   | { type: "countdown"; seconds: number; shot: number }
   | { type: "uploading"; shot: number }
   | { type: "processing" }
@@ -56,12 +85,21 @@ export function startGuestSession(input: GuestSessionInput): { cancel: () => voi
   const sessionId = crypto.randomUUID();
   const run: Run = { cancelled: false, settled: false };
 
-  const session: ManagedSession = openManagedSession(wsUrl, {
-    photoId: sessionId,
-    eventId,
-    bgId,
-    frameId,
-  });
+  // The result timeout caps the WHOLE session, so it must also cover the
+  // rate-limit cooldowns and per-shot countdowns that run before processing.
+  const resultTimeoutMs =
+    90_000 + SHOT_COUNT * (SHOT_SPACING_SECONDS + COUNTDOWN_SECONDS) * 1000;
+
+  const session: ManagedSession = openManagedSession(
+    wsUrl,
+    {
+      photoId: sessionId,
+      eventId,
+      bgId,
+      frameId,
+    },
+    { resultTimeoutMs },
+  );
 
   // Interruptible 1s tick used by the countdowns.
   let tickTimer: number | null = null;
@@ -101,16 +139,7 @@ export function startGuestSession(input: GuestSessionInput): { cancel: () => voi
   });
 
   async function runSession() {
-    // One presigned URL per shot, plus the socket, before any capture.
     const indices = Array.from({ length: SHOT_COUNT }, (_, i) => i + 1);
-    let uploadUrls: string[];
-    try {
-      uploadUrls = await Promise.all(indices.map((i) => requestPresign(sessionId, i)));
-    } catch (error) {
-      fail(error);
-      return;
-    }
-    if (run.cancelled || run.settled) return;
 
     try {
       // Ensure the backend has the connection registered before any upload
@@ -123,6 +152,16 @@ export function startGuestSession(input: GuestSessionInput): { cancel: () => voi
     if (run.cancelled || run.settled) return;
 
     for (const shot of indices) {
+      // Space shots so the 1/min background remover never gets throttled.
+      let remaining = secondsUntilNextShotAllowed();
+      while (remaining > 0) {
+        if (run.cancelled || run.settled) return;
+        onPhase({ type: "cooldown", seconds: remaining, shot });
+        await sleep(1000);
+        remaining = secondsUntilNextShotAllowed();
+      }
+      if (run.cancelled || run.settled) return;
+
       // Countdown for this shot.
       for (let seconds = COUNTDOWN_SECONDS; seconds > 0; seconds--) {
         if (run.cancelled || run.settled) return;
@@ -132,11 +171,15 @@ export function startGuestSession(input: GuestSessionInput): { cancel: () => voi
       if (run.cancelled || run.settled) return;
 
       // Capture and upload this shot immediately so processing can start.
+      // The presigned URL is requested per shot: with cooldowns in the loop,
+      // upfront URLs would expire (120s) long before later shots are taken.
       onPhase({ type: "uploading", shot });
       try {
+        const uploadUrl = await requestPresign(sessionId, shot);
         const blob = await captureJpeg(video);
         if (run.cancelled || run.settled) return;
-        await uploadJpeg(uploadUrls[shot - 1], blob);
+        await uploadJpeg(uploadUrl, blob);
+        markShotNow();
       } catch (error) {
         fail(error);
         return;
