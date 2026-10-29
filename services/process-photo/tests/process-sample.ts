@@ -3,10 +3,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { removeBackgroundWithBedrock } from '../src/bedrock.js';
-import { compositePhoto } from '../src/composite.js';
+import { compositeStrip } from '../src/composite.js';
+import { SHOT_COUNT } from '../src/frame-layout.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const assetsRoot = path.join(__dirname, '..', '..', '..', 'assets');
 
 async function processSamplePhoto() {
   console.log('====================================================');
@@ -43,67 +45,28 @@ async function processSamplePhoto() {
   fs.writeFileSync(cutoutPath, cutoutBuffer);
   console.log(`   Cutout saved to: ${cutoutPath}`);
 
-  // 3. Create a photobooth backdrop
-  console.log('\n3. 🎨 Preparing photobooth background & frame...');
-  const canvasWidth = 1920;
-  const canvasHeight = 1080;
+  // 3. Load the baked frame overlay and curated backgrounds
+  console.log('\n3. 🎨 Preparing frame overlay & curated backgrounds...');
+  const overlayPath = path.join(assetsRoot, 'frames', 'curated', 'default.png');
+  const overlayBuffer = fs.readFileSync(overlayPath);
 
-  // Background: Event stage backdrop
-  const svgBg = `
-    <svg width="${canvasWidth}" height="${canvasHeight}" viewBox="0 0 ${canvasWidth} ${canvasHeight}" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <radialGradient id="stageGlow" cx="50%" cy="30%" r="80%">
-          <stop offset="0%" style="stop-color:#3a1c71;stop-opacity:1" />
-          <stop offset="50%" style="stop-color:#d76d77;stop-opacity:1" />
-          <stop offset="100%" style="stop-color:#ffaf7b;stop-opacity:1" />
-        </radialGradient>
-      </defs>
-      <rect width="${canvasWidth}" height="${canvasHeight}" fill="url(#stageGlow)" />
-      <!-- Bokeh lights -->
-      <circle cx="300" cy="200" r="120" fill="#ffffff" opacity="0.1" />
-      <circle cx="1600" cy="300" r="180" fill="#ffffff" opacity="0.1" />
-      <circle cx="960" cy="700" r="250" fill="#ffffff" opacity="0.08" />
-    </svg>
-  `;
-  const backgroundBuffer = await sharp(Buffer.from(svgBg)).jpeg({ quality: 95 }).toBuffer();
+  const bgDir = path.join(assetsRoot, 'backgrounds', 'curated');
+  const bgFiles = fs
+    .readdirSync(bgDir)
+    .filter((f) => /\.(jpe?g|png)$/i.test(f))
+    .slice(0, SHOT_COUNT);
+  const backgrounds = bgFiles.map((f) => fs.readFileSync(path.join(bgDir, f)));
 
-  // Frame: ARCUS event frame
-  const svgFrame = `
-    <svg width="${canvasWidth}" height="${canvasHeight}" viewBox="0 0 ${canvasWidth} ${canvasHeight}" xmlns="http://www.w3.org/2000/svg">
-      <!-- Outer Border -->
-      <rect x="35" y="35" width="${canvasWidth - 70}" height="${canvasHeight - 70}" fill="none" stroke="#ffd700" stroke-width="14" rx="28" />
-      <rect x="55" y="55" width="${canvasWidth - 110}" height="${canvasHeight - 110}" fill="none" stroke="#ffffff" stroke-width="2" rx="18" opacity="0.6" />
-      
-      <!-- Top Header Tag -->
-      <rect x="${canvasWidth / 2 - 220}" y="20" width="440" height="55" rx="12" fill="#1a202c" />
-      <text x="${canvasWidth / 2}" y="56" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="24" font-weight="bold" fill="#ffd700" text-anchor="middle">
-        ★ ARCUS PHOTOBOOTH ★
-      </text>
+  // Reuse the single sample cutout across all slots for the local demo.
+  const slots = backgrounds.map((backgroundBuffer) => ({
+    backgroundBuffer,
+    cutoutBuffer,
+  }));
 
-      <!-- Bottom Event Banner -->
-      <rect x="${canvasWidth / 2 - 300}" y="${canvasHeight - 95}" width="600" height="65" rx="15" fill="#1a202c" opacity="0.95" />
-      <text x="${canvasWidth / 2}" y="${canvasHeight - 52}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="28" font-weight="bold" fill="#ffffff" text-anchor="middle">
-        AWS STUDENT BUILDER GROUP
-      </text>
-    </svg>
-  `;
-  const frameBuffer = await sharp(Buffer.from(svgFrame)).png().toBuffer();
-
-  // 4. Composite: Background -> Cutout -> Frame
-  console.log('\n4. 🖼️  Compositing layers (Background → Cutout → Frame)...');
+  // 4. Composite: per-slot subtle background + cutout, frame overlay on top
+  console.log('\n4. 🖼️  Compositing strip (slots → overlay)...');
   const t1 = Date.now();
-  const finalJpeg = await compositePhoto(
-    {
-      backgroundBuffer,
-      cutoutBuffer,
-      frameBuffer,
-    },
-    {
-      dimensions: { width: canvasWidth, height: canvasHeight },
-      quality: 92,
-      cutoutScale: 0.88,
-    }
-  );
+  const finalJpeg = await compositeStrip(overlayBuffer, slots, { quality: 92 });
   const compDuration = Date.now() - t1;
   console.log(`   ✅ Composited in ${compDuration}ms! Final size: ${finalJpeg.length} bytes.`);
 

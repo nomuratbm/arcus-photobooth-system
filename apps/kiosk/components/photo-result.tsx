@@ -14,7 +14,11 @@ export function PhotoResult({ url }: { url: string }) {
   const routerRef = useRef(router);
   const [seconds, setSeconds] = useState(RESULT_SECONDS);
 
-  routerRef.current = router;
+  // Keep the latest router for the countdown callback without re-running the
+  // timer effect (refs must not be written during render).
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
 
   useEffect(() => {
     let remaining = RESULT_SECONDS;
@@ -32,18 +36,23 @@ export function PhotoResult({ url }: { url: string }) {
   }, []);
 
   return (
-    <div className="mx-auto flex h-dvh max-w-6xl flex-col items-center gap-6 px-6 py-8">
-      <p aria-live="polite" className="text-center">
+    <div className="mx-auto flex min-h-dvh max-w-6xl flex-col items-center gap-6 px-6 py-8">
+      <p
+        aria-live="polite"
+        className="sticky top-4 z-10 rounded-full bg-ink/85 px-6 py-3 text-center backdrop-blur"
+      >
         <span className="font-display text-5xl tabular-nums">{seconds}</span>
         <span className="mt-1 block text-sm text-paper/70">seconds</span>
       </p>
-      <div className="relative min-h-0 w-full flex-1 overflow-hidden rounded-[2rem] border-[12px] border-paper bg-black">
+      {/* Tall, scrollable frame: the strip is portrait, so size it by height
+          (well beyond one viewport) instead of letterboxing it into one screen. */}
+      <div className="relative aspect-[600/1697] h-[170dvh] max-w-[92vw] overflow-hidden rounded-[2rem] border-[12px] border-paper bg-black">
         <Image
           src={url}
           alt="Finished photobooth photo in its frame"
           fill
           unoptimized
-          sizes="(min-width: 1024px) 70vw, 100vw"
+          sizes="min(92vw, 61dvh)"
           className="object-contain"
         />
       </div>

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   parseRawPhotoKey,
   buildFinalPhotoKey,
+  buildCutoutKey,
   readPhotoFromS3,
   writeFinalPhotoToS3,
   resetS3Client,
@@ -19,29 +20,36 @@ vi.mock('@aws-sdk/client-s3', async () => {
 });
 
 describe('S3 Key Utilities', () => {
-  it('parses valid raw photo key', () => {
-    const res = parseRawPhotoKey('raw/photo-uuid-123.jpg');
-    expect(res).toEqual({ photoId: 'photo-uuid-123' });
+  it('parses valid raw shot key', () => {
+    const res = parseRawPhotoKey('raw/session-uuid-123/2.jpg');
+    expect(res).toEqual({ sessionId: 'session-uuid-123', index: 2 });
   });
 
-  it('handles urlencoded raw photo key', () => {
-    const res = parseRawPhotoKey('raw/photo%20with+spaces.jpg');
-    expect(res).toEqual({ photoId: 'photo with spaces' });
+  it('handles urlencoded raw shot key', () => {
+    const res = parseRawPhotoKey('raw/session%20with+spaces/1.jpg');
+    expect(res).toEqual({ sessionId: 'session with spaces', index: 1 });
   });
 
-  it('rejects keys from final/ (safety prevention of recursive Lambda loops)', () => {
-    expect(parseRawPhotoKey('final/photo-uuid-123.jpg')).toBeNull();
+  it('rejects keys from final/ and work/ (safety prevention of recursive Lambda loops)', () => {
+    expect(parseRawPhotoKey('final/session-uuid-123.jpg')).toBeNull();
+    expect(parseRawPhotoKey('work/session-uuid-123/1.png')).toBeNull();
   });
 
-  it('rejects keys outside raw/ directory', () => {
+  it('rejects keys outside raw/{sessionId}/{index} pattern', () => {
     expect(parseRawPhotoKey('assets/frames/default/frame1.png')).toBeNull();
     expect(parseRawPhotoKey('raw/')).toBeNull();
-    expect(parseRawPhotoKey('raw/.jpg')).toBeNull();
+    expect(parseRawPhotoKey('raw/session.jpg')).toBeNull();
+    expect(parseRawPhotoKey('raw/session/0.jpg')).toBeNull();
+    expect(parseRawPhotoKey('raw/session/abc.jpg')).toBeNull();
     expect(parseRawPhotoKey('some-other-prefix/photo.jpg')).toBeNull();
   });
 
   it('builds final photo key correctly', () => {
-    expect(buildFinalPhotoKey('photo-123')).toBe('final/photo-123.jpg');
+    expect(buildFinalPhotoKey('session-123')).toBe('final/session-123.jpg');
+  });
+
+  it('builds cutout key correctly', () => {
+    expect(buildCutoutKey('session-123', 3)).toBe('work/session-123/3.png');
   });
 });
 

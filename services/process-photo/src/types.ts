@@ -7,6 +7,8 @@ export interface PhotoSessionRecord {
   eventId?: string;
   bgId?: string;
   frameId?: string;
+  /** Number of raw shots received so far (atomic counter, finalize at SHOT_COUNT). */
+  shotsReceived?: number;
   error?: string;
   createdAt?: number;
   updatedAt?: number;
@@ -34,13 +36,9 @@ export interface ServiceConfig {
   defaultEventId: string;
 }
 
-export interface CompositingAssets {
+export interface SlotInput {
+  /** Subtle background image buffer for this slot. */
   backgroundBuffer: Buffer;
+  /** Transparent background-removed cutout for this slot. */
   cutoutBuffer: Buffer;
-  frameBuffer: Buffer;
-}
-
-export interface CompositingDimensions {
-  width: number;
-  height: number;
 }

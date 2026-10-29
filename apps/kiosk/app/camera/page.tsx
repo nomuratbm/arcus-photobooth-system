@@ -1,4 +1,4 @@
-import { KioskLoader } from "@/components/kiosk-loader";
+import { KioskBooth } from "@/components/kiosk-booth";
 import type { BoothConfig } from "@/lib/contracts";
 import { cameraIdFromQuery, frameIdFromQuery, getPublicConfig } from "@/lib/public-config";
 
@@ -24,7 +24,7 @@ export default async function CameraPage({
 
   return (
     <main>
-      <KioskLoader config={booth} />
+      <KioskBooth config={booth} />
     </main>
   );
 }

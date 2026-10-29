@@ -9,6 +9,7 @@ import {
   startGuestSession,
   type GuestPhase,
 } from "@/lib/guest-session";
+import { SHOT_COUNT } from "@/lib/contracts";
 import type { BoothConfig } from "@/lib/contracts";
 
 const boothHeader = (
@@ -37,14 +38,15 @@ function statusLabel(
   cameraError: string | null,
   cameraReady: boolean,
 ): string {
-  if (phase.type === "countdown") return `Hold still. ${phase.seconds}`;
-  if (phase.type === "uploading") return "Sending photo…";
-  if (phase.type === "processing") return "Making your photo…";
+  if (phase.type === "countdown")
+    return `Shot ${phase.shot} of ${SHOT_COUNT}. Hold still. ${phase.seconds}`;
+  if (phase.type === "uploading") return `Sending photo ${phase.shot}…`;
+  if (phase.type === "processing") return "Making your photo strip…";
   if (phase.type === "done") return "Your photo is ready.";
   if (phase.type === "error") return phase.message;
   if (cameraError) return cameraError;
   if (!cameraReady) return "Starting camera…";
-  return `Press the shutter. You will have ${COUNTDOWN_SECONDS} seconds.`;
+  return `Press the shutter for ${SHOT_COUNT} photos, ${COUNTDOWN_SECONDS}s apart.`;
 }
 
 export function KioskBooth({ config }: { config: BoothConfig }) {
@@ -157,7 +159,9 @@ export function KioskBooth({ config }: { config: BoothConfig }) {
           {cameraError !== null && phase.type === "idle" ? (
             <p className="absolute inset-x-6 bottom-6 text-center text-sm">{cameraError}</p>
           ) : null}
-          {phase.type === "countdown" ? <CountdownOverlay seconds={phase.seconds} /> : null}
+          {phase.type === "countdown" ? (
+            <CountdownOverlay seconds={phase.seconds} shot={phase.shot} />
+          ) : null}
           {showProgress ? (
             <p className="absolute inset-x-6 bottom-6 text-center text-lg">{label}</p>
           ) : null}

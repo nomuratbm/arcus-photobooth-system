@@ -1,14 +1,14 @@
 import { captureJpeg } from "@/lib/capture";
-import { finalImageUrl, type WebSocketMessage } from "@/lib/contracts";
-import { openSession, waitForResult } from "@/lib/socket";
+import { finalImageUrl, SHOT_COUNT } from "@/lib/contracts";
+import { openManagedSession, type ManagedSession } from "@/lib/socket";
 import { requestPresign, uploadJpeg } from "@/lib/upload";
 
 export const COUNTDOWN_SECONDS = 10;
 
 export type GuestPhase =
   | { type: "idle" }
-  | { type: "countdown"; seconds: number }
-  | { type: "uploading" }
+  | { type: "countdown"; seconds: number; shot: number }
+  | { type: "uploading"; shot: number }
   | { type: "processing" }
   | { type: "done"; url: string }
   | { type: "error"; message: string };
@@ -26,9 +26,6 @@ export type GuestSessionInput = {
 type Run = {
   cancelled: boolean;
   settled: boolean;
-  socket: WebSocket | null;
-  timer: number | null;
-  result: Promise<WebSocketMessage> | null;
 };
 
 function errorMessage(error: unknown): string {
@@ -36,8 +33,12 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Owns one guest photo: register during the countdown, capture when it ends,
- * then upload and wait for the finished image. The booth only renders phases.
+ * Owns one guest session: captures SHOT_COUNT photos, each preceded by its own
+ * countdown, uploads each as it is taken, then waits for the single composited
+ * strip. The booth only renders phases.
+ *
+ * The connection is managed by {@link openManagedSession}, which reconnects
+ * automatically if the socket drops mid-session so the guest isn't stuck.
  */
 export function startGuestSession(input: GuestSessionInput): { cancel: () => void } {
   const { video, wsUrl, cloudfrontDomain, eventId, frameId, bgId, onPhase } = input;
@@ -52,134 +53,128 @@ export function startGuestSession(input: GuestSessionInput): { cancel: () => voi
     return { cancel() {} };
   }
 
-  const photoId = crypto.randomUUID();
-  const run: Run = {
-    cancelled: false,
-    settled: false,
-    socket: null,
-    timer: null,
-    result: null,
-  };
+  const sessionId = crypto.randomUUID();
+  const run: Run = { cancelled: false, settled: false };
 
-  const sessionPromise = openSession(wsUrl, { photoId, eventId, bgId, frameId });
-  const presignPromise = requestPresign(photoId);
+  const session: ManagedSession = openManagedSession(wsUrl, {
+    photoId: sessionId,
+    eventId,
+    bgId,
+    frameId,
+  });
 
-  const releaseSocket = (ws: WebSocket | null) => {
-    ws?.close();
-    if (run.socket === ws) run.socket = null;
-  };
-
-  const clearTimer = () => {
-    if (run.timer === null) return;
-    window.clearInterval(run.timer);
-    run.timer = null;
+  // Interruptible 1s tick used by the countdowns.
+  let tickTimer: number | null = null;
+  let tickResolve: (() => void) | null = null;
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => {
+      tickResolve = resolve;
+      tickTimer = window.setTimeout(() => {
+        tickTimer = null;
+        tickResolve = null;
+        resolve();
+      }, ms);
+    });
+  const interruptSleep = () => {
+    if (tickTimer !== null) {
+      window.clearTimeout(tickTimer);
+      tickTimer = null;
+    }
+    const resolve = tickResolve;
+    tickResolve = null;
+    resolve?.();
   };
 
   const fail = (error: unknown) => {
     if (run.cancelled || run.settled) return;
     run.settled = true;
-    clearTimer();
+    interruptSleep();
     onPhase({ type: "error", message: errorMessage(error) });
-    if (run.socket) {
-      releaseSocket(run.socket);
-      return;
-    }
-    void sessionPromise.then((ws) => ws.close()).catch(() => undefined);
+    session.close();
   };
 
-  sessionPromise.then(
-    (ws) => {
-      if (run.cancelled || run.settled) {
-        ws.close();
-        return;
-      }
-      run.socket = ws;
-      run.result = waitForResult(ws);
-      void run.result.catch(() => undefined);
-    },
-    (error: unknown) => {
-      fail(error);
-    },
-  );
-
-  presignPromise.catch((error: unknown) => {
+  // A connection that fails (after its reconnects are exhausted) should surface
+  // immediately rather than leave the guest waiting.
+  session.connected.catch(() => undefined);
+  session.result.catch((error: unknown) => {
     fail(error);
   });
 
-  let remaining = COUNTDOWN_SECONDS;
-  onPhase({ type: "countdown", seconds: remaining });
-
-  run.timer = window.setInterval(() => {
-    if (run.cancelled || run.settled) return;
-    remaining -= 1;
-    if (remaining > 0) {
-      onPhase({ type: "countdown", seconds: remaining });
+  async function runSession() {
+    // One presigned URL per shot, plus the socket, before any capture.
+    const indices = Array.from({ length: SHOT_COUNT }, (_, i) => i + 1);
+    let uploadUrls: string[];
+    try {
+      uploadUrls = await Promise.all(indices.map((i) => requestPresign(sessionId, i)));
+    } catch (error) {
+      fail(error);
       return;
     }
-    clearTimer();
-    void captureAndUpload();
-  }, 1000);
-
-  async function captureAndUpload() {
     if (run.cancelled || run.settled) return;
-    onPhase({ type: "uploading" });
 
     try {
-      const [ws, uploadUrl] = await Promise.all([sessionPromise, presignPromise]);
-      if (run.cancelled || run.settled) {
-        releaseSocket(ws);
-        return;
+      // Ensure the backend has the connection registered before any upload
+      // can kick off processing.
+      await session.connected;
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    if (run.cancelled || run.settled) return;
+
+    for (const shot of indices) {
+      // Countdown for this shot.
+      for (let seconds = COUNTDOWN_SECONDS; seconds > 0; seconds--) {
+        if (run.cancelled || run.settled) return;
+        onPhase({ type: "countdown", seconds, shot });
+        await sleep(1000);
       }
-
-      run.socket = ws;
-      const resultPromise = run.result ?? waitForResult(ws);
-      run.result = resultPromise;
-      void resultPromise.catch(() => undefined);
-
-      const blob = await captureJpeg(video);
-      if (run.cancelled || run.settled) {
-        releaseSocket(ws);
-        return;
-      }
-
-      await uploadJpeg(uploadUrl, blob);
-      if (run.cancelled || run.settled) {
-        releaseSocket(ws);
-        return;
-      }
-
-      onPhase({ type: "processing" });
-      const message = await resultPromise;
       if (run.cancelled || run.settled) return;
 
+      // Capture and upload this shot immediately so processing can start.
+      onPhase({ type: "uploading", shot });
+      try {
+        const blob = await captureJpeg(video);
+        if (run.cancelled || run.settled) return;
+        await uploadJpeg(uploadUrls[shot - 1], blob);
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      if (run.cancelled || run.settled) return;
+    }
+
+    // All shots uploaded; wait for the composited strip.
+    onPhase({ type: "processing" });
+    try {
+      const message = await session.result;
+      if (run.cancelled || run.settled) return;
       run.settled = true;
       if (message.status === "error") {
         onPhase({ type: "error", message: message.message });
         return;
       }
-
       onPhase({
         type: "done",
         url: finalImageUrl(cloudfrontDomain, message.key),
       });
     } catch (error) {
       fail(error);
+      return;
     } finally {
-      releaseSocket(run.socket);
+      session.close();
     }
   }
+
+  void runSession();
 
   return {
     cancel() {
       if (run.settled) return;
       run.cancelled = true;
       run.settled = true;
-      clearTimer();
-      if (run.socket) {
-        releaseSocket(run.socket);
-        return;
-      }
-      void sessionPromise.then((ws) => ws.close()).catch(() => undefined);
+      interruptSleep();
+      session.close();
     },
   };
 }

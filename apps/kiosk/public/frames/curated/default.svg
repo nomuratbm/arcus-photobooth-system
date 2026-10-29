@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 2546">
+  <defs>
+    <mask id="openings">
+      <rect width="900" height="2546" fill="#fff"/>
+      <rect x="62" y="233" width="766" height="456" fill="#000"/>
+      <rect x="57" y="764" width="769" height="451" fill="#000"/>
+      <rect x="59" y="1299" width="771" height="458" fill="#000"/>
+    </mask>
+  </defs>
+  <rect width="900" height="2546" fill="#2b2436" mask="url(#openings)"/>
+  <rect x="62" y="233" width="766" height="456" fill="none" stroke="#1a1612" stroke-width="16"/>
+  <rect x="57" y="764" width="769" height="451" fill="none" stroke="#1a1612" stroke-width="16"/>
+  <rect x="59" y="1299" width="771" height="458" fill="none" stroke="#1a1612" stroke-width="16"/>
+  <text x="450" y="2050" text-anchor="middle" font-family="Georgia, serif" font-size="120" fill="#f2d478">Lavender Town</text>
+</svg>

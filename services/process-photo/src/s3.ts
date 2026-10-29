@@ -13,41 +13,58 @@ export function resetS3Client(): void {
   s3ClientInstance = null;
 }
 
+export interface ParsedRawPhotoKey {
+  sessionId: string;
+  index: number;
+}
+
 /**
- * Parses and validates an S3 key for a raw photobooth photo.
- * Expected pattern: raw/{photoId}.jpg
+ * Parses and validates an S3 key for a raw photobooth shot.
+ * Expected pattern: raw/{sessionId}/{index}.jpg  (index = 1-based shot number)
  *
- * CRITICAL SAFETY CHECK: Keys starting with "final/" or anything outside "raw/"
- * MUST return null to prevent recursive Lambda invocation loops.
+ * CRITICAL SAFETY CHECK: Keys starting with "final/" or "work/" or anything
+ * outside "raw/" MUST return null to prevent recursive Lambda invocation loops.
  */
-export function parseRawPhotoKey(key: string): { photoId: string } | null {
+export function parseRawPhotoKey(key: string): ParsedRawPhotoKey | null {
   // Decode S3 event key (S3 replaces spaces with '+' and URI-encodes other characters)
   const decodedKey = decodeURIComponent(key.replace(/\+/g, '%20'));
 
-  // Explicit safety check: never process final/
-  if (decodedKey.startsWith('final/')) {
+  // Explicit safety check: never process our own outputs
+  if (decodedKey.startsWith('final/') || decodedKey.startsWith('work/')) {
     return null;
   }
 
-  // Must match raw/<photoId>.jpg (case-insensitive extension)
-  const match = decodedKey.match(/^raw\/([^/]+)\.(jpe?g|png)$/i);
+  // Must match raw/<sessionId>/<index>.jpg (case-insensitive extension)
+  const match = decodedKey.match(/^raw\/([^/]+)\/(\d+)\.(jpe?g|png)$/i);
   if (!match) {
     return null;
   }
 
-  const photoId = match[1];
-  if (!photoId || photoId.trim().length === 0) {
+  const sessionId = match[1];
+  const index = Number.parseInt(match[2], 10);
+
+  if (!sessionId || sessionId.trim().length === 0) {
+    return null;
+  }
+  if (!Number.isInteger(index) || index < 1) {
     return null;
   }
 
-  return { photoId };
+  return { sessionId, index };
 }
 
 /**
- * Builds the final destination S3 key for a finished photobooth photo.
+ * Builds the intermediate cutout key for one shot of a session.
  */
-export function buildFinalPhotoKey(photoId: string): string {
-  return `final/${photoId}.jpg`;
+export function buildCutoutKey(sessionId: string, index: number): string {
+  return `work/${sessionId}/${index}.png`;
+}
+
+/**
+ * Builds the final destination S3 key for a finished photobooth strip.
+ */
+export function buildFinalPhotoKey(sessionId: string): string {
+  return `final/${sessionId}.jpg`;
 }
 
 /**
@@ -71,16 +88,41 @@ export async function readPhotoFromS3(bucket: string, key: string): Promise<Buff
 }
 
 /**
- * Uploads a finished composite photo to S3 with ContentType: image/jpeg.
+ * Uploads a transparent background-removed cutout for one shot to work/.
+ * These are intermediates consumed by the finalize step; they never trigger
+ * the Lambda because the S3 notification filter only matches raw/.
+ */
+export async function writeCutoutToS3(
+  bucket: string,
+  sessionId: string,
+  index: number,
+  imageBuffer: Buffer
+): Promise<string> {
+  const client = getS3Client();
+  const key = buildCutoutKey(sessionId, index);
+
+  const command = new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: imageBuffer,
+    ContentType: 'image/png',
+  });
+
+  await client.send(command);
+  return key;
+}
+
+/**
+ * Uploads the finished composite strip to S3 with ContentType: image/jpeg.
  * Overwrites existing key if retried.
  */
 export async function writeFinalPhotoToS3(
   bucket: string,
-  photoId: string,
+  sessionId: string,
   imageBuffer: Buffer
 ): Promise<string> {
   const client = getS3Client();
-  const key = buildFinalPhotoKey(photoId);
+  const key = buildFinalPhotoKey(sessionId);
 
   const command = new PutObjectCommand({
     Bucket: bucket,

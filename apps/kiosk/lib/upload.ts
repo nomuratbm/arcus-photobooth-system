@@ -1,8 +1,8 @@
-export async function requestPresign(photoId: string): Promise<string> {
+export async function requestPresign(sessionId: string, index: number): Promise<string> {
   const response = await fetch("/api/presign", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ photoId }),
+    body: JSON.stringify({ sessionId, index }),
   });
 
   let payload: unknown = null;

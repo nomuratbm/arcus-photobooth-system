@@ -1,95 +1,130 @@
 import sharp from 'sharp';
-import type { CompositingAssets, CompositingDimensions } from './types.js';
+import { FRAME_LAYOUT } from './frame-layout.js';
+import type { SlotInput } from './types.js';
 
-export interface CompositePhotoOptions {
-  /** Target canvas dimensions if overriding background image dimensions */
-  dimensions?: CompositingDimensions;
-  /** Output JPEG quality (1-100, default 90) */
-  quality?: number;
-  /** Relative scale factor for cutout compared to background height (default 0.90) */
-  cutoutScale?: number;
+export interface SubtleBackgroundOptions {
+  /** Gaussian blur radius applied to the background (default 8). */
+  blurSigma?: number;
+  /** Brightness multiplier to dim the background (default 0.85). */
+  brightness?: number;
+  /** Saturation multiplier to mute the background (default 0.55). */
+  saturation?: number;
 }
 
+export interface CompositeStripOptions {
+  /** Output JPEG quality (1-100, default 90). */
+  quality?: number;
+  /** Fraction of a slot's height the cutout may occupy (default 0.96). */
+  cutoutScale?: number;
+  /** How strongly to mute the background so the foreground pops. */
+  subtle?: SubtleBackgroundOptions;
+}
+
+const DEFAULT_SUBTLE: Required<SubtleBackgroundOptions> = {
+  blurSigma: 8,
+  brightness: 0.85,
+  saturation: 0.55,
+};
+
 /**
- * Composites the photobooth image in the exact order:
- * 1. Background image (base)
- * 2. Cutout transparent PNG (middle, resized and centered)
- * 3. Frame transparent PNG (top overlay, stretched/fitted to canvas)
- *
- * @param assets - { backgroundBuffer, cutoutBuffer, frameBuffer }
- * @param options - Optional composite options
- * @returns Promise<Buffer> - Composited JPEG buffer
+ * Builds one slot tile: a subtle (blurred, dimmed, desaturated) background with
+ * the person cutout layered on top, sized exactly to the slot rectangle.
  */
-export async function compositePhoto(
-  assets: CompositingAssets,
-  options: CompositePhotoOptions = {}
+async function buildSlotTile(
+  slot: SlotInput,
+  rectWidth: number,
+  rectHeight: number,
+  cutoutScale: number,
+  subtle: Required<SubtleBackgroundOptions>
 ): Promise<Buffer> {
-  const { backgroundBuffer, cutoutBuffer, frameBuffer } = assets;
-  const quality = options.quality ?? 90;
-  const cutoutScale = options.cutoutScale ?? 0.9;
+  // 1. Background: cover-fit to the slot, then mute it so it stays subtle.
+  const subtleBackground = await sharp(slot.backgroundBuffer)
+    .resize(rectWidth, rectHeight, { fit: 'cover', position: 'center' })
+    .blur(subtle.blurSigma)
+    .modulate({ brightness: subtle.brightness, saturation: subtle.saturation })
+    .png()
+    .toBuffer();
 
-  // 1. Get background dimensions
-  const bgMetadata = await sharp(backgroundBuffer).metadata();
-  const canvasWidth = options.dimensions?.width ?? bgMetadata.width;
-  const canvasHeight = options.dimensions?.height ?? bgMetadata.height;
-
-  if (!canvasWidth || !canvasHeight) {
-    throw new Error('Could not determine canvas dimensions from background image.');
-  }
-
-  // Ensure base background image is scaled to target canvas dimensions
-  const baseBackground = sharp(backgroundBuffer).resize(canvasWidth, canvasHeight, {
-    fit: 'cover',
-    position: 'center',
-  });
-
-  // 2. Prepare cutout (scale to fit canvas nicely, maintaining aspect ratio)
-  const maxCutoutWidth = Math.round(canvasWidth * 0.95);
-  const maxCutoutHeight = Math.round(canvasHeight * cutoutScale);
-
-  const resizedCutoutBuffer = await sharp(cutoutBuffer)
-    .resize(maxCutoutWidth, maxCutoutHeight, {
+  // 2. Cutout: fit inside the slot, keeping aspect ratio.
+  const cutoutBuffer = await sharp(slot.cutoutBuffer)
+    .resize(rectWidth, Math.round(rectHeight * cutoutScale), {
       fit: 'inside',
       withoutEnlargement: false,
     })
+    .png()
     .toBuffer();
 
-  const cutoutMeta = await sharp(resizedCutoutBuffer).metadata();
-  const cutoutWidth = cutoutMeta.width ?? maxCutoutWidth;
-  const cutoutHeight = cutoutMeta.height ?? maxCutoutHeight;
+  const cutoutMeta = await sharp(cutoutBuffer).metadata();
+  const cutoutWidth = cutoutMeta.width ?? rectWidth;
+  const cutoutHeight = cutoutMeta.height ?? rectHeight;
 
-  // Center horizontally, align bottom with slight margin (or center vertically)
-  const cutoutLeft = Math.max(0, Math.round((canvasWidth - cutoutWidth) / 2));
-  // Photobooth portrait: place cutout so it sits naturally towards bottom of canvas
-  const bottomMargin = Math.max(0, Math.round(canvasHeight * 0.05));
-  const cutoutTop = Math.max(0, canvasHeight - cutoutHeight - bottomMargin);
+  // Center horizontally, rest towards the bottom of the slot.
+  const left = Math.max(0, Math.round((rectWidth - cutoutWidth) / 2));
+  const bottomMargin = Math.round(rectHeight * 0.02);
+  const top = Math.max(0, rectHeight - cutoutHeight - bottomMargin);
 
-  // 3. Prepare frame (scaled to cover the exact canvas dimensions)
-  const resizedFrameBuffer = await sharp(frameBuffer)
-    .resize(canvasWidth, canvasHeight, {
-      fit: 'fill',
-    })
+  return sharp(subtleBackground)
+    .composite([{ input: cutoutBuffer, left, top }])
+    .png()
     .toBuffer();
+}
 
-  // 4. Layer compositing: Background -> Cutout -> Frame
-  const compositedJpeg = await baseBackground
-    .composite([
-      {
-        input: resizedCutoutBuffer,
-        top: cutoutTop,
-        left: cutoutLeft,
-      },
-      {
-        input: resizedFrameBuffer,
-        top: 0,
-        left: 0,
-      },
-    ])
-    .jpeg({
-      quality,
-      mozjpeg: true,
-    })
+/**
+ * Composites the 3-shot photobooth strip:
+ * 1. A transparent canvas at the frame layout size.
+ * 2. For each slot: subtle background + person cutout, clipped to the slot.
+ * 3. The baked frame overlay (decorations, borders, title) on top; its slot
+ *    openings are transparent so the photos show through.
+ *
+ * @param overlayBuffer - Baked frame overlay PNG (transparent slot openings).
+ * @param slots - One { backgroundBuffer, cutoutBuffer } per slot, in order.
+ * @param options - Optional compositing options.
+ * @returns Promise<Buffer> - Composited JPEG strip.
+ */
+export async function compositeStrip(
+  overlayBuffer: Buffer,
+  slots: SlotInput[],
+  options: CompositeStripOptions = {}
+): Promise<Buffer> {
+  const quality = options.quality ?? 90;
+  const cutoutScale = options.cutoutScale ?? 0.96;
+  const subtle = { ...DEFAULT_SUBTLE, ...options.subtle };
+
+  const { width, height, slots: rects } = FRAME_LAYOUT;
+
+  if (slots.length !== rects.length) {
+    throw new Error(
+      `Expected ${rects.length} slot inputs but received ${slots.length}.`
+    );
+  }
+
+  // Build each slot tile, then place it at its rectangle on the canvas.
+  const layerInputs: sharp.OverlayOptions[] = [];
+  for (let i = 0; i < rects.length; i++) {
+    const rect = rects[i];
+    const tile = await buildSlotTile(
+      slots[i],
+      rect.width,
+      rect.height,
+      cutoutScale,
+      subtle
+    );
+    layerInputs.push({ input: tile, left: rect.x, top: rect.y });
+  }
+
+  // Frame overlay on top, stretched to the exact canvas size.
+  const overlay = await sharp(overlayBuffer)
+    .resize(width, height, { fit: 'fill' })
+    .png()
     .toBuffer();
+  layerInputs.push({ input: overlay, left: 0, top: 0 });
 
-  return compositedJpeg;
+  const canvas = sharp({
+    create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+  });
+
+  return canvas
+    .composite(layerInputs)
+    .jpeg({ quality, mozjpeg: true })
+    .toBuffer();
 }

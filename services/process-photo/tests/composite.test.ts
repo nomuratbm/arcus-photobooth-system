@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import sharp from 'sharp';
-import { compositePhoto } from '../src/composite.js';
+import { compositeStrip } from '../src/composite.js';
+import { FRAME_LAYOUT, SHOT_COUNT } from '../src/frame-layout.js';
 
-async function createTestAssets() {
-  // Background: 800x600 blue rectangle
+async function createTestSlots() {
+  // Background: blue rectangle (will be muted by the subtle treatment)
   const backgroundBuffer = await sharp({
     create: {
       width: 800,
@@ -15,7 +16,7 @@ async function createTestAssets() {
     .jpeg()
     .toBuffer();
 
-  // Cutout: 400x400 transparent PNG with a red circle
+  // Cutout: transparent PNG with a red circle
   const svgCutout = `
     <svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
       <circle cx="200" cy="200" r="150" fill="#ff4500" />
@@ -23,48 +24,53 @@ async function createTestAssets() {
   `;
   const cutoutBuffer = await sharp(Buffer.from(svgCutout)).png().toBuffer();
 
-  // Frame: 800x600 transparent PNG with yellow border
-  const svgFrame = `
-    <svg width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
-      <rect x="20" y="20" width="760" height="560" fill="none" stroke="#ffd700" stroke-width="40" />
-    </svg>
-  `;
-  const frameBuffer = await sharp(Buffer.from(svgFrame)).png().toBuffer();
-
-  return { backgroundBuffer, cutoutBuffer, frameBuffer };
+  return Array.from({ length: SHOT_COUNT }, () => ({
+    backgroundBuffer,
+    cutoutBuffer,
+  }));
 }
 
-describe('compositePhoto', () => {
-  it('composites background, cutout, and frame into a valid JPEG', async () => {
-    const assets = await createTestAssets();
-    const resultBuffer = await compositePhoto(assets);
+async function createTestOverlay() {
+  // Frame overlay: transparent canvas with a yellow border, matching layout size
+  const { width, height } = FRAME_LAYOUT;
+  const svgFrame = `
+    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="20" y="20" width="${width - 40}" height="${height - 40}" fill="none" stroke="#ffd700" stroke-width="40" />
+    </svg>
+  `;
+  return sharp(Buffer.from(svgFrame)).png().toBuffer();
+}
+
+describe('compositeStrip', () => {
+  it('composites slots and overlay into a valid JPEG at layout size', async () => {
+    const slots = await createTestSlots();
+    const overlay = await createTestOverlay();
+
+    const resultBuffer = await compositeStrip(overlay, slots);
 
     expect(resultBuffer).toBeInstanceOf(Buffer);
     expect(resultBuffer.length).toBeGreaterThan(0);
 
     const metadata = await sharp(resultBuffer).metadata();
     expect(metadata.format).toBe('jpeg');
-    expect(metadata.width).toBe(800);
-    expect(metadata.height).toBe(600);
+    expect(metadata.width).toBe(FRAME_LAYOUT.width);
+    expect(metadata.height).toBe(FRAME_LAYOUT.height);
   });
 
-  it('respects custom target canvas dimensions', async () => {
-    const assets = await createTestAssets();
-    const resultBuffer = await compositePhoto(assets, {
-      dimensions: { width: 1200, height: 900 },
-      quality: 85,
-    });
+  it('rejects when the number of slots does not match the layout', async () => {
+    const slots = await createTestSlots();
+    const overlay = await createTestOverlay();
 
-    const metadata = await sharp(resultBuffer).metadata();
-    expect(metadata.format).toBe('jpeg');
-    expect(metadata.width).toBe(1200);
-    expect(metadata.height).toBe(900);
+    await expect(compositeStrip(overlay, slots.slice(0, 1))).rejects.toThrow(
+      /Expected \d+ slot inputs/
+    );
   });
 
-  it('rejects with error if background buffer is invalid', async () => {
-    const assets = await createTestAssets();
-    assets.backgroundBuffer = Buffer.from('invalid-buffer');
+  it('rejects with error if a background buffer is invalid', async () => {
+    const slots = await createTestSlots();
+    slots[0].backgroundBuffer = Buffer.from('invalid-buffer');
+    const overlay = await createTestOverlay();
 
-    await expect(compositePhoto(assets)).rejects.toThrow();
+    await expect(compositeStrip(overlay, slots)).rejects.toThrow();
   });
 });

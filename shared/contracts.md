@@ -10,12 +10,20 @@ Bucket prefix conventions:
 
 | Prefix | Pattern | Purpose | Written by | Read by |
 |---|---|---|---|---|
-| Raw Photos | `raw/{photoId}.jpg` | Uploaded raw photo taken by guest | Kiosk (via presigned URL) | `process-photo` Lambda |
-| Final Photos | `final/{photoId}.jpg` | Finished composite image (background + cutout + frame) | `process-photo` Lambda | CloudFront / Kiosk / Admin |
-| Frames | `assets/frames/{eventId}/{frameId}.png` | Transparent PNG overlay frame | Admin / Seed script | `process-photo` Lambda |
-| Backgrounds | `assets/backgrounds/{eventId}/{bgId}.jpg` | Background image backdrop | Admin / Seed script | `process-photo` Lambda |
+| Raw Shots | `raw/{sessionId}/{index}.jpg` | One raw photo per shot (`index` = 1..3) | Kiosk (via presigned URL) | `process-photo` Lambda |
+| Work Cutouts | `work/{sessionId}/{index}.png` | Background-removed cutout per shot (intermediate) | `process-photo` Lambda | `process-photo` Lambda (finalize) |
+| Final Strip | `final/{sessionId}.jpg` | Finished 3-slot composite strip | `process-photo` Lambda | CloudFront / Kiosk / Admin |
+| Frames | `assets/frames/{eventId}/{frameId}.png` | Baked frame overlay PNG (transparent slot openings) | Bake script / seed | `process-photo` Lambda |
+| Backgrounds | `assets/backgrounds/{eventId}/{bgId}.jpg` | Background image backdrop (random per slot) | Admin / Seed script | `process-photo` Lambda |
 
-> **Safety rule**: The Lambda event notification filter MUST match prefix `raw/` and suffix `.jpg` to prevent infinite loops when writing to `final/`.
+> **Safety rule**: The Lambda event notification filter MUST match prefix `raw/` and suffix `.jpg` to prevent infinite loops when writing to `final/` or `work/`.
+
+### Multi-shot sessions
+Each guest session captures **3 shots** (`SHOT_COUNT = 3`). Every raw upload triggers the
+processing Lambda, which removes the background for that shot, stores the cutout in
+`work/`, and atomically increments the session's `shotsReceived` counter. The invocation
+that reaches `shotsReceived == 3` finalizes: it loads all 3 cutouts, picks a random
+background per slot, composites them into the frame overlay, and writes `final/{sessionId}.jpg`.
 
 ---
 
@@ -27,9 +35,10 @@ Bucket prefix conventions:
 
 | Attribute | Type | Key Type | Description |
 |---|---|---|---|
-| `photoId` | String (`S`) | Partition Key | Unique identifier for the photo session (e.g. UUID v4 or nanoid) |
+| `photoId` | String (`S`) | Partition Key | Unique identifier for the session (UUID v4); also the `sessionId` |
 | `connectionId` | String (`S`) | Attribute | API Gateway WebSocket connection ID |
 | `status` | String (`S`) | Attribute | Session status: `connected` \| `processing` \| `done` \| `error` |
+| `shotsReceived` | Number (`N`) | Attribute | Atomic counter of raw shots received (finalize at 3) |
 | `eventId` | String (`S`) | Attribute | Event identifier (defaults to `default` if unspecified) |
 | `bgId` | String (`S`) | Attribute | Selected background ID |
 | `frameId` | String (`S`) | Attribute | Selected frame ID |
@@ -44,8 +53,9 @@ Bucket prefix conventions:
 
 ### Connection URL
 ```
-wss://{api-id}.execute-api.{region}.amazonaws.com/{stage}?photoId={photoId}
+wss://{api-id}.execute-api.{region}.amazonaws.com/{stage}?photoId={sessionId}
 ```
+`photoId` carries the session UUID; all 3 shots of a session share it.
 
 ### Outbound Messages (Server → Kiosk)
 
@@ -66,9 +76,9 @@ wss://{api-id}.execute-api.{region}.amazonaws.com/{stage}?photoId={photoId}
 ```
 
 ### Final Image Delivery
-The kiosk constructs the public URL for the image:
+The kiosk constructs the public URL for the finished strip:
 ```
-https://{CLOUDFRONT_DOMAIN}/final/{photoId}.jpg
+https://{CLOUDFRONT_DOMAIN}/final/{sessionId}.jpg
 ```
 
 ---

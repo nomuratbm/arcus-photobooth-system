@@ -21,6 +21,12 @@ body {
   contain-intrinsic-size: auto 28rem;
 }
 
+/* Page box for physical printing; content height = 100vh - 20mm below. */
+@page {
+  size: portrait;
+  margin: 10mm;
+}
+
 @media print {
   .no-print {
     display: none !important;
@@ -31,8 +37,34 @@ body {
     color: black;
   }
 
-  .print-card {
+  main {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* One photo per printed page, fitted to the page and never split.
+     Only cards the admin selected (.print-selected) are printed. */
+  .print-grid {
+    display: block;
+  }
+
+  .print-card:not(.print-selected) {
+    display: none !important;
+  }
+
+  .print-card.print-selected {
     content-visibility: visible;
     break-inside: avoid;
+    break-after: page;
+    aspect-ratio: auto;
+    width: 100%;
+    height: calc(100vh - 20mm);
+    border-radius: 0;
+    opacity: 1;
+  }
+
+  .print-card.print-last {
+    break-after: auto;
   }
 }

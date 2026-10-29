@@ -40,6 +40,38 @@ export async function getSessionRecord(
 }
 
 /**
+ * Atomically increments the number of shots received for a session and returns
+ * the new count. Because DynamoDB ADD is atomic, exactly one concurrent
+ * invocation will observe the count reaching the expected total and can act as
+ * the finalizer.
+ */
+export async function incrementShotCount(
+  tableName: string,
+  photoId: string
+): Promise<number> {
+  const ddb = getDynamoDBDocumentClient();
+
+  const command = new UpdateCommand({
+    TableName: tableName,
+    Key: { photoId },
+    UpdateExpression: 'ADD #shotsReceived :one SET #updatedAt = :updatedAt',
+    ExpressionAttributeNames: {
+      '#shotsReceived': 'shotsReceived',
+      '#updatedAt': 'updatedAt',
+    },
+    ExpressionAttributeValues: {
+      ':one': 1,
+      ':updatedAt': Date.now(),
+    },
+    ReturnValues: 'UPDATED_NEW',
+  });
+
+  const response = await ddb.send(command);
+  const count = (response.Attributes as Record<string, unknown> | undefined)?.shotsReceived;
+  return typeof count === 'number' ? count : Number(count ?? 0);
+}
+
+/**
  * Updates the photo session status (and optional error message) in DynamoDB.
  */
 export async function updatePhotoStatus(

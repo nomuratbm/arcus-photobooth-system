@@ -4,8 +4,7 @@ import { verifyAdminSession } from "@/lib/auth";
 import type { PrintPhoto } from "@/lib/contracts";
 import { listFinalPhotos, PrintStorageError } from "@/lib/s3";
 import { LoginForm } from "@/components/login-form";
-import { PhotoGrid } from "@/components/photo-grid";
-import { PrintButton } from "@/components/print-button";
+import { PrintDesk } from "@/components/print-desk";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +50,6 @@ export default async function PrintPage({
           <Link href="/camera" className="text-sm text-paper/80 underline-offset-4 hover:underline">
             Back to booth
           </Link>
-          <PrintButton />
           <form action={logoutAdmin}>
             <button
               type="submit"
@@ -65,7 +63,7 @@ export default async function PrintPage({
       {listError !== null ? (
         <p className="text-lg">{listError}</p>
       ) : (
-        <PhotoGrid photos={photos} />
+        <PrintDesk photos={photos} />
       )}
     </main>
   );

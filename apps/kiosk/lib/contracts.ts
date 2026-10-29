@@ -32,8 +32,12 @@ export type WebSocketMessage =
 export const PHOTO_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function rawPhotoKey(photoId: string): string {
-  return `raw/${photoId}.jpg`;
+/** Number of photos captured per guest session (composited into one strip). */
+export const SHOT_COUNT = 3;
+
+/** S3 key for one shot of a session: raw/{sessionId}/{index}.jpg */
+export function rawShotKey(sessionId: string, index: number): string {
+  return `raw/${sessionId}/${index}.jpg`;
 }
 
 export function finalImageUrl(domain: string, key: string): string {

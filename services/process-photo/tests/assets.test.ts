@@ -3,14 +3,16 @@ import {
   getAssetWithCache,
   clearAssetCache,
   getAssetCacheSize,
-  loadBackgroundAndFrame,
-  buildBackgroundKeyCandidates,
+  loadFrameOverlay,
   buildFrameKeyCandidates,
+  chooseBackgroundKeys,
 } from '../src/assets.js';
 import * as s3Module from '../src/s3.js';
 
 vi.mock('../src/s3.js', () => ({
   readPhotoFromS3: vi.fn(),
+  getS3Client: vi.fn(),
+  buildCutoutKey: (sessionId: string, index: number) => `work/${sessionId}/${index}.png`,
 }));
 
 describe('Asset Caching & Loading', () => {
@@ -19,14 +21,13 @@ describe('Asset Caching & Loading', () => {
     clearAssetCache();
   });
 
-  it('builds candidate keys with fallbacks', () => {
-    const bgCandidates = buildBackgroundKeyCandidates('event-1', 'beach');
-    expect(bgCandidates).toContain('assets/backgrounds/event-1/beach.jpg');
-    expect(bgCandidates).toContain('assets/backgrounds/event-1/default.jpg');
-
+  it('builds frame overlay candidate keys with fallbacks', () => {
     const frameCandidates = buildFrameKeyCandidates('event-1', 'gold');
     expect(frameCandidates).toContain('assets/frames/event-1/gold.png');
     expect(frameCandidates).toContain('assets/frames/event-1/default.png');
+
+    const defaultCandidates = buildFrameKeyCandidates('curated');
+    expect(defaultCandidates).toContain('assets/frames/curated/default.png');
   });
 
   it('fetches from S3 on cache miss and uses cache on subsequent calls', async () => {
@@ -58,34 +59,42 @@ describe('Asset Caching & Loading', () => {
     expect(getAssetCacheSize()).toBe(0);
   });
 
-  it('successfully loads background and frame together', async () => {
-    const mockBg = Buffer.from('bg-data');
+  it('successfully loads the frame overlay', async () => {
     const mockFrame = Buffer.from('frame-data');
+    vi.spyOn(s3Module, 'readPhotoFromS3').mockResolvedValue(mockFrame);
 
-    vi.spyOn(s3Module, 'readPhotoFromS3').mockImplementation(async (_bucket, key) => {
-      if (key.includes('backgrounds')) return mockBg;
-      if (key.includes('frames')) return mockFrame;
-      throw new Error('Not found');
+    const result = await loadFrameOverlay('my-bucket', {
+      eventId: 'curated',
+      frameId: 'default',
     });
 
-    const result = await loadBackgroundAndFrame('my-bucket', {
-      eventId: 'arcus-2026',
-      bgId: 'stage',
-      frameId: 'sponsor-border',
-    });
-
-    expect(result.backgroundBuffer).toBe(mockBg);
-    expect(result.frameBuffer).toBe(mockFrame);
+    expect(result).toBe(mockFrame);
+    expect(s3Module.readPhotoFromS3).toHaveBeenCalledWith(
+      'my-bucket',
+      'assets/frames/curated/default.png'
+    );
   });
 
-  it('throws descriptive error if background cannot be found', async () => {
+  it('throws descriptive error if the frame overlay cannot be found', async () => {
     vi.spyOn(s3Module, 'readPhotoFromS3').mockRejectedValue(new Error('NoSuchKey'));
 
     await expect(
-      loadBackgroundAndFrame('my-bucket', {
-        eventId: 'arcus-2026',
-        bgId: 'nonexistent',
-      })
-    ).rejects.toThrow(/Failed to load background asset/);
+      loadFrameOverlay('my-bucket', { eventId: 'curated', frameId: 'nonexistent' })
+    ).rejects.toThrow(/Failed to load frame overlay/);
+  });
+
+  it('chooses distinct background keys up to the available pool', () => {
+    const keys = ['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg', 'e.jpg'];
+    const chosen = chooseBackgroundKeys(keys, 3);
+    expect(chosen).toHaveLength(3);
+    expect(new Set(chosen).size).toBe(3);
+    for (const key of chosen) expect(keys).toContain(key);
+  });
+
+  it('repeats backgrounds when fewer exist than requested', () => {
+    const keys = ['only.jpg'];
+    const chosen = chooseBackgroundKeys(keys, 3);
+    expect(chosen).toHaveLength(3);
+    expect(chosen.every((key) => key === 'only.jpg')).toBe(true);
   });
 });
