@@ -3,7 +3,11 @@ import { finalImageUrl, SHOT_COUNT } from "@/lib/contracts";
 import { openManagedSession, type ManagedSession } from "@/lib/socket";
 import { requestPresign, uploadJpeg } from "@/lib/upload";
 
+/** Default per-photo countdown; operators can pick another COUNTDOWN_OPTIONS value in the booth. */
 export const COUNTDOWN_SECONDS = 5;
+
+/** Countdown lengths offered in the booth, tuned for different customer arrival rates. */
+export const COUNTDOWN_OPTIONS: readonly number[] = [5, 10];
 
 /**
  * The Bedrock background-removal model allows 1 request per minute. Within a
@@ -50,6 +54,8 @@ export type GuestSessionInput = {
   eventId: string;
   frameId: string;
   bgId: string;
+  /** Seconds of countdown before each shot. */
+  countdownSeconds: number;
   onPhase: (phase: GuestPhase) => void;
 };
 
@@ -71,7 +77,8 @@ function errorMessage(error: unknown): string {
  * automatically if the socket drops mid-session so the guest isn't stuck.
  */
 export function startGuestSession(input: GuestSessionInput): { cancel: () => void } {
-  const { video, wsUrl, cloudfrontDomain, eventId, frameId, bgId, onPhase } = input;
+  const { video, wsUrl, cloudfrontDomain, eventId, frameId, bgId, countdownSeconds, onPhase } =
+    input;
 
   if (!wsUrl) {
     onPhase({ type: "error", message: "WebSocket URL is not configured." });
@@ -89,7 +96,7 @@ export function startGuestSession(input: GuestSessionInput): { cancel: () => voi
   // The result timeout caps the WHOLE session, so it must also cover the
   // possible pre-session cooldown and the per-shot countdowns.
   const resultTimeoutMs =
-    90_000 + (SESSION_COOLDOWN_SECONDS + SHOT_COUNT * COUNTDOWN_SECONDS) * 1000;
+    90_000 + (SESSION_COOLDOWN_SECONDS + SHOT_COUNT * countdownSeconds) * 1000;
 
   const session: ManagedSession = openManagedSession(
     wsUrl,
@@ -167,7 +174,7 @@ export function startGuestSession(input: GuestSessionInput): { cancel: () => voi
       }
 
       // Countdown for this shot.
-      for (let seconds = COUNTDOWN_SECONDS; seconds > 0; seconds--) {
+      for (let seconds = countdownSeconds; seconds > 0; seconds--) {
         if (run.cancelled || run.settled) return;
         onPhase({ type: "countdown", seconds, shot });
         await sleep(1000);

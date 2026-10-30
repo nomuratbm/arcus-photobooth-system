@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BoothNotice, PhotoResult } from "@/components/photo-result";
 import { CountdownOverlay } from "@/components/countdown-overlay";
 import {
+  COUNTDOWN_OPTIONS,
   COUNTDOWN_SECONDS,
   secondsUntilNextSessionAllowed,
   startGuestSession,
@@ -38,6 +39,7 @@ function statusLabel(
   phase: GuestPhase,
   cameraError: string | null,
   cameraReady: boolean,
+  countdownSeconds: number,
 ): string {
   if (phase.type === "cooldown")
     return `Background remover allows 1/min. Next session starts in ${phase.seconds}s.`;
@@ -49,7 +51,7 @@ function statusLabel(
   if (phase.type === "error") return phase.message;
   if (cameraError) return cameraError;
   if (!cameraReady) return "Starting camera…";
-  return `Press the shutter for ${SHOT_COUNT} photos, ${COUNTDOWN_SECONDS}s apart.`;
+  return `Press the shutter for ${SHOT_COUNT} photos, ${countdownSeconds}s apart.`;
 }
 
 /** Top-left pill counting down until the next session is allowed (1/min limit). */
@@ -72,6 +74,9 @@ export function KioskBooth({ config }: { config: BoothConfig }) {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [idleCooldown, setIdleCooldown] = useState(0);
+  // Per-photo countdown chosen by the operator (5s keeps the queue moving,
+  // 10s gives slower arrivals more time to pose). Locked while a session runs.
+  const [countdownSeconds, setCountdownSeconds] = useState<number>(COUNTDOWN_SECONDS);
 
   // While idle, tick the leftover cooldown from the previous shot so the
   // operator sees when a new session can start without being throttled.
@@ -159,6 +164,7 @@ export function KioskBooth({ config }: { config: BoothConfig }) {
       eventId: config.eventId,
       frameId: config.frameId,
       bgId: config.bgId,
+      countdownSeconds,
       onPhase: setBoothPhase,
     });
   }
@@ -167,7 +173,7 @@ export function KioskBooth({ config }: { config: BoothConfig }) {
     return <PhotoResult url={phase.url} />;
   }
 
-  const label = statusLabel(phase, cameraError, cameraReady);
+  const label = statusLabel(phase, cameraError, cameraReady, countdownSeconds);
   const showProgress = phase.type === "uploading" || phase.type === "processing";
   const cooldownSeconds =
     phase.type === "cooldown" ? phase.seconds : phase.type === "idle" ? idleCooldown : 0;
@@ -202,6 +208,27 @@ export function KioskBooth({ config }: { config: BoothConfig }) {
         </section>
 
         <aside className="flex flex-col gap-6">
+          <div className="flex flex-col items-center gap-2">
+            <span className="text-xs tracking-wide text-paper/70 uppercase">Countdown</span>
+            <div className="flex gap-2" role="group" aria-label="Seconds per photo">
+              {COUNTDOWN_OPTIONS.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={countdownSeconds === option}
+                  disabled={phase.type !== "idle"}
+                  onClick={() => setCountdownSeconds(option)}
+                  className={
+                    countdownSeconds === option
+                      ? "rounded-full bg-amber px-4 py-1.5 text-sm font-medium text-ink disabled:opacity-40"
+                      : "rounded-full border border-paper/30 px-4 py-1.5 text-sm disabled:opacity-40"
+                  }
+                >
+                  {option}s
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             type="button"
             onClick={handleTakePhoto}
